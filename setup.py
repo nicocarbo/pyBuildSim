@@ -10,7 +10,7 @@ with open(os.path.join(dir_path, "requirements.txt")) as f:
     
 setuptools.setup(  
     name='pyBuildSim', 
-    version='0.0.0',  
+    version='0.0.1',  
     description='Python package for performing simplified building simulation',
     url='https://github.com/nicocarbo/pyBuildSim',  
     author='Nicolas Carbonare', 
