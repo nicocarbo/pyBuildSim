@@ -1,21 +1,19 @@
 # -*- coding: utf-8 -*-
+"""
+author: Nicolas Carbonare
+mail: nicocarbonare@gmail
+"""
 
-
-import os, setuptools
+from setuptools import setup, find_packages
 from codecs import open
+from os import path
 
-dir_path = os.path.dirname(os.path.realpath(__file__))
-with open(os.path.join(dir_path, "requirements.txt")) as f:
-    required_packages = f.read().splitlines()
-    
-setuptools.setup(  
+setup(  
     name='pyBuildSim', 
     version='0.0.1',  
     description='Python package for performing simplified building simulation',
     url='https://github.com/nicocarbo/pyBuildSim',  
     author='Nicolas Carbonare', 
     author_email='nicocarbonare@gmail.com',  
-    packages=setuptools.find_packages(),
-    install_requires=required_packages,
-    include_package_data=True
+    packages=find_packages() 
     )
