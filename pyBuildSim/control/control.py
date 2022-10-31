@@ -1156,46 +1156,130 @@ class Controller_Ventilation_Fuzzy_Winter:
 #-------------------------------------------------------------------------------#            
 
 
-class Heatingcurve: # TO DO
-    def __init__(self, T_room_set = 293.15,
-                       T_flow_nom = 333.15,
-                       T_ret_nom  = 318.15,
-                       T_amb_nom  = 261.15,
-                       T_amb_lim  = 293.15,
-                       heatingexp = 1.2):
+class HeatingCurve:
+    '''
+    --------------------------------------------------------------
+    Heating curve model for heat pump controlling. The inputs are the 
+    nominal heat pump parameters, and the output is the temperature
+    set point for the floor heating/radiator system. 
+    The model is based on the heating curve model of the Modelica
+    Buildings library (https://simulationresearch.lbl.gov/modelica/). 
+    --------------------------------------------------------------              
+    '''
+    def __init__(self, **kwargs): 
+        '''
+        Initial conditions for the model
+        Allowed keyword arguments (**kwargs):
+    	----------	
+        § T_room_set: float (default = 293.15)
+            room temperature set point, in K
+        § T_room_nom: float (default = 293.15)
+            room nominal temperature set point, in K
+        § T_sup_nom: float (default = 333.15)
+            nominal heating system supply temperature set point, in K
+        § T_ret_nom: float (default = 318.15)
+            nominal heating system return temperature set point, in K
+        § T_amb_nom: float (default = 261.15)
+            nominal ambient temperature, in K
+        § T_amb_lim: float (default = 293.15)
+            nominal lowest ambient temperature, in K
+        § heatingexp: float (default = 1.3)
+            heating curve exponent, limited between 0 and 3, dimensionless            
+        '''
+               
+        allowed_keys = {'T_room_set', 'T_room_nom', 'T_sup_nom', 'T_ret_nom',
+                        'T_amb_nom','T_amb_lim', 'heatingexp'}
 
-        self.T_room_set                 = T_room_set
-        self.T_flow_nom                 = T_flow_nom
-        self.T_ret_nom                  = T_ret_nom
-        self.T_amb_nom                  = T_amb_nom
-        self.T_amb_lim                  = T_amb_lim
-        self.heatingexp                 = min(max(heatingexp, 0.0), 3.0)  #  = min(max(heatingexp, 0.0), 2.0) + 1.0
-        self.dT_offset                  = T_room_set - T_amb_lim
-        self.T_amb_offset_nominal       = T_amb_nom + self.dT_offset
-
-    def calc(self, T_amb, rr=False):
-        self.T_amb                      = T_amb
-
-        if np.isscalar(T_amb):
-            self.T_amb_offset           = self.T_amb + self.dT_offset
-            self.qflow_rel              = max(0., (self.T_room_set - self.T_amb_offset)/(self.T_room_set - self.T_amb_offset_nominal))  # relative heating load, compared to nominal conditions
-            self.T_flow_set             = self.T_room_set + ((self.T_flow_nom + self.T_ret_nom)/2 - self.T_room_set) * self.qflow_rel**(1./self.heatingexp) + (self.T_flow_nom - self.T_ret_nom)/2. * self.qflow_rel
-            self.T_ret_set              = self.T_flow_set - self.qflow_rel * (self.T_flow_nom - self.T_ret_nom)
-
+        rejected_keys = set(kwargs.keys()) - set(allowed_keys)
+        if rejected_keys:
+            raise ValueError("Invalid arguments in constructor: {}".
+                             format(rejected_keys))
         else:
-            self.T_amb_offset           = np.zeros_like(self.T_amb)
-            self.qflow_rel              = np.zeros_like(self.T_amb)
-            self.T_flow_set             = np.zeros_like(self.T_amb)
-            self.T_ret_set              = np.zeros_like(self.T_amb)
+            self.default_values()
+            self.__dict__.update((k, v) for k, v in kwargs.items() 
+            if k in allowed_keys)
+            self.default_curve_prop()
+           
+           
+    def default_values(self):
+        '''
+        Reset the values to the default ones
+        '''
 
-            for i in range(len(self.T_amb)):
-                self.T_amb_offset[i]    = self.T_amb[i] + self.dT_offset
-                self.qflow_rel[i]       = max(0., (self.T_room_set - self.T_amb_offset[i])/(self.T_room_set - self.T_amb_offset_nominal))  # relative heating load, compared to nominal conditions
-                self.T_flow_set[i]      = self.T_room_set + ((self.T_flow_nom + self.T_ret_nom)/2 - self.T_room_set) * self.qflow_rel[i]**(1./self.heatingexp) + (self.T_flow_nom - self.T_ret_nom)/2. * self.qflow_rel[i]
-                self.T_ret_set[i]       = self.T_flow_set[i] - self.qflow_rel[i] * (self.T_flow_nom - self.T_ret_nom)
+        T_room_set = 293.15
+        T_room_nom = 293.15
+        T_sup_nom = 333.15
+        T_ret_nom  = 318.15
+        T_amb_nom  = 261.15
+        T_amb_lim  = 293.15
+        heatingexp = 1.3
+
+
+    def default_curve_prop(self):
+        '''
+        Calculate the default properties of the heating curve
+        '''
+
+        self.heatingexp       = min(max(heatingexp, 0.0), 3.0)
+        self.dTAmbHeaBal      = T_room_set - T_amb_lim
+        self.T_amb_offset_nom = T_amb_nom + self.dTAmbHeaBal
+
+
+    def curve_calc(self, T_amb):
+        '''
+        Calculate the system actual supply and return temperatures
+        as a function of the ambient temperature. 
+        Parameters:
+    	----------	           
+        § T_amb: float 
+            ambient temperature, in K     
+        Returns:
+    	----------	           
+        § T_sup: float 
+            system supply temperature, in K            
+        § T_ret: float 
+            system return temperature, in K                
+        '''
+        self.T_amb = T_amb
+        
+        T_amb_offset = self.T_amb + self.dTAmbHeaBal
+        
+        # Relative heating load, compared to nominal conditions
+        self.qRel = max(0., (self.T_room_set - T_amb_offset)/(self.T_room_nom - self.T_amb_offset_nom)) 
+        
+        # Determine supply and return temperatures
+        T_sup = self.T_room_set + ((self.T_sup_nom + self.T_ret_nom)/2 - self.T_room_nom) * self.qRel**(1./self.heatingexp) + (self.T_sup_nom - self.T_ret_nom)/2. * self.qflow_rel
+        T_ret = T_sup - self.qRel * (self.T_sup_nom - self.T_ret_nom)
+        
+        return [T_sup, T_ret]
+              
+        
+    def update(self, T_amb, rr=False):
+        '''
+        Update the value of the heating curve according to the ambient temperature
+        Parameters:
+    	----------	           
+        § T_amb: float 
+            ambient temperature, in K     
+        Returns:
+    	----------	           
+        § T_sup: float 
+            system supply temperature, in K            
+        § T_ret: float 
+            system return temperature, in K     
+        '''
+        if np.isscalar(T_amb):
+            [self.T_sup, self.T_ret] = self.curve_calc(T_amb)
+            
+        else:
+            self.T_sup = np.zeros_like(T_amb)
+            self.T_ret = np.zeros_like(T_amb)
+
+            for i in range(len(T_amb)):
+                [self.T_sup[i], self.T_ret[i]] = self.curve_calc(T_amb[i])
 
         if rr:
-            return self.T_flow_set, self.T_ret_set
+            return [self.T_sup, self.T_ret]
 
    
 if __name__ == '__main__':
